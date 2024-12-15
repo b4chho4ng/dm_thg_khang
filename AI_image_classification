@@ -1,0 +1,146 @@
+import os
+import numpy as np
+import cv2
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import matplotlib.pyplot as plt
+import random
+
+# Mount Google Drive (only necessary if not already mounted in Colab)
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Path to your dataset directory
+dataset_dir = '/content/drive/MyDrive/dataset'
+
+# Function to check and return the available image paths
+def check_directory(path, categories):
+    for category in categories:
+        dir_path = os.path.join(path, category)
+        if not os.path.exists(dir_path):
+            raise FileNotFoundError(f"Directory not found: {dir_path}")
+        else:
+            print(f"Directory {dir_path} found with {len(os.listdir(dir_path))} images.")
+    return {category: os.listdir(os.path.join(path, category)) for category in categories}
+
+# Checking and listing image directories
+try:
+    categories = ['hand', 'foot']
+    image_dict = check_directory(dataset_dir, categories)
+except Exception as e:
+    print("Error:", e)
+    # Optional: Exit or handle the error gracefully depending on your workflow
+    # raise e  # Uncomment to raise the error if directories are not found
+
+# Function to load images
+def load_images(image_dict, dataset_dir):
+    X, y = [], []
+    for label, images in image_dict.items():
+        for image_name in images:
+            img_path = os.path.join(dataset_dir, label, image_name)
+            img = cv2.imread(img_path)
+            if img is not None:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = cv2.resize(img, (128, 128))
+                X.append(img)
+                y.append(0 if label == 'hand' else 1)
+            else:
+                print(f"Failed to load image: {img_path}")
+    return np.array(X), np.array(y)
+
+# Load image data
+X, y = load_images(image_dict, dataset_dir)
+
+# Split the data into training and testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Data augmentation generator
+datagen = ImageDataGenerator(
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+# Build a more complex model with Dropout, Batch Normalization, and L2 Regularization
+def build_advanced_model():
+    model = Sequential([
+        Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 3), kernel_regularizer=l2(0.01)),
+        BatchNormalization(),
+        MaxPooling2D(2, 2),
+        Dropout(0.3),
+
+        Conv2D(64, (3, 3), activation='relu', kernel_regularizer=l2(0.01)),
+        BatchNormalization(),
+        MaxPooling2D(2, 2),
+        Dropout(0.3),
+
+        Conv2D(128, (3, 3), activation='relu', kernel_regularizer=l2(0.01)),
+        BatchNormalization(),
+        MaxPooling2D(2, 2),
+        Dropout(0.3),
+
+        Flatten(),
+        Dense(512, activation='relu', kernel_regularizer=l2(0.01)),
+        Dropout(0.5),
+        Dense(1, activation='sigmoid')
+    ])
+
+    model.compile(optimizer='adam',
+                  loss='binary_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
+model = build_advanced_model()
+
+# Implementing Early Stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+# Train the model with Early Stopping and data augmentation
+history = model.fit(datagen.flow(X_train, y_train, batch_size=32),
+                    epochs=30,
+                    validation_data=(X_test, y_test),
+                    callbacks=[early_stopping])
+
+# Function to plot training history and display images
+def plot_training_history(history):
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    epochs = range(len(acc))
+
+    plt.plot(epochs, acc, 'b', label='Training  Accuracy')
+    plt.plot(epochs, val_acc, 'r', label='Validation Accuracy')
+    plt.title('Training and Validation Accuracy')
+    plt.legend()
+
+    plt.figure()
+
+    plt.plot(epochs, loss, 'b', label='Training Loss')
+    plt.plot(epochs, val_loss, 'r', label='Validation Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+
+    plt.show()
+
+    # Display some hand and foot images
+    plt.figure(figsize=(10, 7))
+    for i, idx in enumerate(random.sample(range(len(X)), 6)):
+        plt.subplot(2, 3, i + 1)
+        plt.imshow(X[idx], cmap='gray')
+        plt.title('Hand' if y[idx] == 0 else 'Foot')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+# Display training history
+plot_training_history(history)
